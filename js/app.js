@@ -10,14 +10,14 @@ const state = {
 const gitExplorer = createGitExplorer({ api, confirm: confirmNearButton });
 const sidebarResizeHandle = $("#sidebarResizeHandle");
 function setWorkspaceSidebarWidth(width) {
-  const max = Math.max(240, Math.min(460, window.innerWidth - 420));
+  const max = Math.max(280, Math.min(460, window.innerWidth - 420));
   const value = Math.round(Math.max(220, Math.min(max, width)));
   document.body.style.setProperty("--workspace-sidebar-width", `${value}px`);
   sidebarResizeHandle.setAttribute("aria-valuenow", String(value));
   return value;
 }
 sidebarResizeHandle.addEventListener("pointerdown", (event) => {
-  if (!document.body.classList.contains("workspace-active") || window.matchMedia("(max-width: 800px)").matches || event.button !== 0) return;
+  if (window.matchMedia("(max-width: 800px)").matches || event.button !== 0) return;
   event.preventDefault();
   const startX = event.clientX;
   const startWidth = parseFloat(getComputedStyle($(".sidebar")).width);
@@ -36,7 +36,7 @@ sidebarResizeHandle.addEventListener("pointerdown", (event) => {
   sidebarResizeHandle.addEventListener("pointercancel", finish);
 });
 sidebarResizeHandle.addEventListener("keydown", (event) => {
-  if (!document.body.classList.contains("workspace-active") || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  if (window.matchMedia("(max-width: 800px)").matches || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
   const current = parseFloat(getComputedStyle($(".sidebar")).width);
   const value = setWorkspaceSidebarWidth(current + (event.key === "ArrowRight" ? 16 : -16));
@@ -138,7 +138,11 @@ document.addEventListener("toggle", (event) => {
 
 function executionStepLabelHTML(step) {
   const command = step.command || (step.label?.startsWith("执行命令：") ? step.label.slice(5) : "");
-  if (!command) return `<span>${escapeHTML(step.label)}</span>`;
+  if (!command) {
+    const fileChange = step.label?.startsWith("修改文件：");
+    const label = fileChange ? step.label.slice("修改文件：".length) : step.label;
+    return `<span class="${fileChange ? "execution-file-change" : ""}">${fileChange ? `<span class="execution-action-label">修改文件</span><span class="execution-file-paths">${escapeHTML(label).replace(/、/g, ", ")}</span>` : escapeHTML(label)}</span>`;
+  }
   const key = `${state.selected?.id}:${step.id}`;
   const preview = command.replace(/\s+/g, " ").trim();
   const shortPreview = Array.from(preview).slice(0, 80).join("") + (Array.from(preview).length > 80 ? "…" : "");
@@ -147,7 +151,9 @@ function executionStepLabelHTML(step) {
 
 function executionStepsHTML(message) {
   if (!message.steps?.length) return "";
-  return `<details class="execution-steps" ${message.streaming ? "open" : ""}><summary>${message.streaming ? "正在执行" : "执行步骤"} · ${message.steps.length} 项</summary><div class="execution-step-list">${message.steps.map((step) => `<div class="execution-step"><span class="execution-step-state ${escapeHTML(step.status)}">${step.status === "running" && message.streaming ? "◌" : step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span>${executionStepLabelHTML(step)}</div>`).join("")}</div></details>`;
+  const latestStep = message.steps.at(-1);
+  const renderStep = (step) => `<div class="execution-step"><span class="execution-step-state ${escapeHTML(step.status)}">${step.status === "running" && message.streaming ? "◌" : step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span>${executionStepLabelHTML(step)}</div>`;
+  return `<details class="execution-steps" ${message.streaming ? "open" : ""}><summary>${message.streaming ? "正在执行" : "执行步骤"} · ${message.steps.length} 项</summary><div class="execution-step-preview">${renderStep(latestStep)}</div><div class="execution-step-list">${message.steps.map(renderStep).join("")}</div></details>`;
 }
 
 function conversationHTML() {
@@ -260,6 +266,11 @@ function renderConversation(forceBottom = false, restoredTop = null) {
   const messageInput = $("#messageInput");
   if (messageInput) messageInput.disabled = messageInput.dataset.phaseGated === "true" || Boolean(state.pendingUserInput);
   list.querySelector("#userInputForm")?.addEventListener("submit", submitUserInput);
+  list.querySelectorAll("#userInputForm textarea").forEach((field) => field.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }));
   list.querySelectorAll("[data-other-answer]").forEach((field) => field.addEventListener("input", () => {
     const index = field.dataset.otherAnswer;
     const option = list.querySelector(`input[name="answer-${index}"][value="__other__"]`);
@@ -1024,7 +1035,7 @@ function initialTaskMessage(data) {
 
 function showTaskWorkspace() {
   const rememberedSidebarWidth = Number(localStorage.getItem("workflow.sidebarWidth"));
-  if (rememberedSidebarWidth > 0 && window.innerWidth > 800) setWorkspaceSidebarWidth(rememberedSidebarWidth);
+  if (window.innerWidth > 800) setWorkspaceSidebarWidth(rememberedSidebarWidth > 0 ? rememberedSidebarWidth : 280);
   document.body.classList.add("workspace-active");
   $("#listPage").classList.add("hidden");
   $("#workspacePage").classList.remove("hidden");
@@ -1362,13 +1373,13 @@ function renderWorkspace() {
   </div></details>`;
   const resultVisible = currentIndex >= phases.indexOf("development");
 
-  $("#workspace").innerHTML = `<div class="workspace-head"><div class="workspace-heading"><h2>${escapeHTML(task.title)}</h2><p>${escapeHTML(task.repositoryPath)}</p></div><div class="workspace-actions"><button type="button" class="button refresh-workspace-button" id="refreshWorkspace" aria-label="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" title="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" ${state.refreshingTaskID === task.id ? "disabled" : ""}><span class="refresh-icon ${state.refreshingTaskID === task.id ? "is-spinning" : ""}" aria-hidden="true">↻</span></button><button type="button" class="button" id="toggleWorkspaceDetails" aria-expanded="false" aria-controls="workspaceDetails">运行事件</button><button class="button ${isArchived(task) ? "" : "archive-button"}" id="toggleArchive">${isArchived(task) ? "恢复任务" : "归档任务"}</button></div></div><div class="phasebar">${phaseSteps}</div>${archivedNotice}
+  $("#workspace").innerHTML = `<div class="workspace-head"><div class="workspace-heading"><h2>${escapeHTML(task.title)}</h2><p>${escapeHTML(task.repositoryPath)}</p></div><div class="workspace-actions"><button type="button" class="button" id="releaseSessionLock" title="关闭当前任务的 Codex 会话并释放写入锁" ${!task.codexThreadId || task.codexActive || isCodexActive() ? "disabled" : ""}>释放会话写入锁</button><button type="button" class="button refresh-workspace-button" id="refreshWorkspace" aria-label="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" title="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" ${state.refreshingTaskID === task.id ? "disabled" : ""}><span class="refresh-icon ${state.refreshingTaskID === task.id ? "is-spinning" : ""}" aria-hidden="true">↻</span></button><button type="button" class="button" id="toggleWorkspaceDetails" aria-expanded="false" aria-controls="workspaceDetails">运行事件</button><button class="button ${isArchived(task) ? "" : "archive-button"}" id="toggleArchive">${isArchived(task) ? "恢复任务" : "归档任务"}</button></div></div><div class="phasebar">${phaseSteps}</div>${archivedNotice}
     <div class="workspace-grid"><div><div id="approvalSlot">${blocker}</div>${resultVisible ? result : ""}
       <section class="workspace-panel conversation-panel"><div class="panel-title">Codex 会话</div><div id="conversationUsageNotice" class="conversation-usage-notice" role="status" hidden>${usageLimitMessage}</div><div class="panel-body conversation-list">
         ${state.conversationError ? `<div class="form-error">无法从 Codex 读取会话：${escapeHTML(state.conversationError)}</div>` : '<div class="task-sub">会话中暂无消息</div>'}
       </div></section>
       <div class="composer"><div class="attachment-list">${state.attachments.map((image, index) => `<span class="attachment-chip"><img src="${image.dataURL}" alt="${escapeHTML(image.name)}"><button type="button" data-remove-attachment="${index}" aria-label="移除图片">×</button></span>`).join("")}</div><textarea id="messageInput" required placeholder="${isArchived(task) ? "请先恢复任务再继续会话" : task.phase === "development" ? "Codex 执行中，可发送补充要求或引导…" : "继续向 Codex 提交任务指令…"}" ${gated ? "disabled" : ""}>${escapeHTML(state.draft)}</textarea>
-      <div class="composer-settings"><div class="composer-add-wrap"><button type="button" class="composer-plus" id="toggleAttachmentMenu" aria-label="更多选项" ${gated ? "disabled" : ""}>＋</button>${state.attachmentMenuOpen ? '<div class="attachment-menu"><button type="button" id="chooseImage">选择图片</button></div>' : ""}</div><input id="fileInput" type="file" accept="image/*" multiple hidden><button type="button" class="composer-option">完全访问</button>${modeControl}<span class="composer-separator"></span>${modelPicker}<button type="button" id="toggleSpeed" class="speed-button ${fastActive ? "active" : ""}" aria-pressed="${fastActive}" title="${fastTier ? `${fastModeDescription(fastTier)}下一轮生效。` : "当前模型不支持快速模式"}" ${!canConfigureCodex || state.codexModelsLoading || !fastTier ? "disabled" : ""}><span aria-hidden="true">${fastActive ? "⚡" : "◷"}</span><span>${fastActive ? "快速" : "普通"}</span></button><button class="button primary" id="sendMessage" aria-label="发送消息" ${gated ? "disabled" : ""}>↑</button></div></div>
+      <div class="composer-settings"><div class="composer-add-wrap"><button type="button" class="composer-plus" id="toggleAttachmentMenu" aria-label="更多选项" ${gated ? "disabled" : ""}>＋</button>${state.attachmentMenuOpen ? '<div class="attachment-menu"><button type="button" id="chooseImage">选择图片</button></div>' : ""}</div><input id="fileInput" type="file" accept="image/*" multiple hidden><span class="composer-option" title="文件访问由任务阶段决定，工具可能需要单独审批">按阶段授权</span>${modeControl}<span class="composer-separator"></span>${modelPicker}<button type="button" id="toggleSpeed" class="speed-button ${fastActive ? "active" : ""}" aria-pressed="${fastActive}" title="${fastTier ? `${fastModeDescription(fastTier)}下一轮生效。` : "当前模型不支持快速模式"}" ${!canConfigureCodex || state.codexModelsLoading || !fastTier ? "disabled" : ""}><span aria-hidden="true">${fastActive ? "⚡" : "◷"}</span><span>${fastActive ? "快速" : "普通"}</span></button><button class="button primary" id="sendMessage" aria-label="发送消息" ${gated ? "disabled" : ""}>↑</button></div></div>
     </div><aside class="workspace-details" id="workspaceDetails"><section class="workspace-panel event-side-card"><div class="panel-title event-panel-title"><span>运行事件</span><time>${escapeHTML(latestEventTime)}</time></div><div class="panel-body timeline event-scrollbox">${events || '<div class="task-sub">暂无运行事件</div>'}</div></section></aside></div>`;
 
   renderConversationUsageNotice();
@@ -1493,6 +1504,18 @@ function renderWorkspace() {
   $("#workspace").querySelectorAll("[id^='riskComment-']").forEach((textarea) => textarea.addEventListener("input", () => { state.riskDrafts[textarea.id.slice("riskComment-".length)] = textarea.value; }));
   $("#workspace").querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => sendApproval(button.dataset.approval)));
   $("#workspace").querySelectorAll("[data-risk-action]").forEach((button) => button.addEventListener("click", () => sendRiskAction(button.dataset.riskAction, button.dataset.riskId)));
+  $("#releaseSessionLock")?.addEventListener("click", async () => {
+    const button = $("#releaseSessionLock");
+    if (!button || button.disabled || !state.selected?.id) return;
+    button.disabled = true;
+    try {
+      await api(`/api/tasks/${state.selected.id}/release-session-lock`, {method:"POST"});
+      await refreshSelectedTask(state.selected.id);
+    } catch (error) {
+      alert(error.message);
+      button.disabled = false;
+    }
+  });
   $("#refreshWorkspace").addEventListener("click", refreshWorkspace);
   $("#toggleArchive").addEventListener("click", toggleArchive);
 }

@@ -30,7 +30,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .app-shell { min-height: 100vh; }
 
 /* Navigation */
-.sidebar { width: 240px; position: fixed; z-index: 5; inset: 0 auto 0 0; display: flex; flex-direction: column; padding: 24px 16px 16px; background: var(--surface); border-right: 1px solid var(--line); }
+.sidebar { width: var(--workspace-sidebar-width, 280px); position: fixed; z-index: 5; inset: 0 auto 0 0; display: flex; flex-direction: column; padding: 24px 16px 16px; background: var(--surface); border-right: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 9px 34px; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 12px; background: linear-gradient(145deg, #665df2, #4338ca); color: white; font-size: 18px; font-weight: 800; box-shadow: 0 5px 12px #4f46e533; }
 .brand strong, .brand span { display: block; }
@@ -49,7 +49,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .more { margin-left: auto; color: #8c93a1; font-size: 18px; }
 
 /* Shared controls and page header */
-.main { max-width: 1700px; min-height: 100vh; margin-left: 240px; padding: 27px clamp(24px, 3vw, 52px) 64px; }
+.main { max-width: 1700px; min-height: 100vh; margin-left: var(--workspace-sidebar-width, 280px); padding: 27px clamp(24px, 3vw, 52px) 64px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 23px; }
 .eyebrow { color: #9299a8; font-size: 10px; font-weight: 700; letter-spacing: 1.2px; }
 .topbar h1 { margin: 3px 0 0; font-size: 23px; letter-spacing: -.6px; }
@@ -315,8 +315,7 @@ label small { display: block; margin-top: 5px; color: var(--subtle); font-size: 
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 21px; }
 
 @media (max-width: 1100px) {
-  .sidebar { width: 205px; }
-  .main { margin-left: 205px; padding-right: 24px; padding-left: 24px; }
+  .main { padding-right: 24px; padding-left: 24px; }
   .workspace-grid { grid-template-columns: minmax(0, 1fr) 220px; }
   .table-head, .task-row { grid-template-columns: minmax(180px, 2fr) minmax(130px, 1.4fr) minmax(110px, 1fr) minmax(110px, 1fr) 20px; }
   .table-head span:nth-child(5), .task-row .time { display: none; }
@@ -483,11 +482,18 @@ body.workspace-active { height: 100dvh; overflow: hidden; }
 
 .execution-steps { margin: 6px 0 10px; border: 1px solid #e8e6f2; border-radius: 8px; background: #faf9fe; font-size: 11px; }
 .execution-steps > summary { padding: 8px 10px; color: #736a92; cursor: pointer; }
-.execution-step-list { padding: 0 10px 8px; }
+.execution-step-list { display: none; padding: 0 10px 8px; }
+.execution-steps[open] .execution-step-preview { display: none; }
+.execution-steps[open] .execution-step-list { display: block; }
+.execution-step-preview { padding: 0 10px 8px; }
 .execution-step { display: flex; align-items: flex-start; gap: 7px; padding: 5px 0; color: #626b7a; overflow-wrap: anywhere; white-space: pre-wrap; }
 .execution-step-state { flex: none; width: 14px; color: #6b9a7b; text-align: center; }
 .execution-step-state.running { color: #8271e5; }
 .execution-step-state.failed { color: #c76c64; }
+.execution-file-change { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.execution-action-label { color: #626b7a; font-weight: 600; }
+.execution-file-paths { display: -webkit-box; min-width: 0; overflow: hidden; color: #858c9b; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.execution-steps[open] .execution-file-paths { display: block; overflow: visible; }
 
 .execution-command { flex: 1; min-width: 0; white-space: normal; }
 .execution-command > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: #736a92; }
@@ -495,9 +501,9 @@ body.workspace-active { height: 100dvh; overflow: hidden; }
 
 
 /* Source control lives in the navigation column, independent of task cards. */
-.workspace-active .sidebar { width: var(--workspace-sidebar-width, 280px); }
+
 .workspace-active .main { margin-left: var(--workspace-sidebar-width, 280px); }
-.sidebar-resize-handle { display: none; }
+.sidebar-resize-handle { position: absolute; z-index: 6; top: 0; right: -5px; bottom: 0; display: block; width: 10px; cursor: col-resize; touch-action: none; }
 .workspace-active .sidebar-resize-handle { position: absolute; z-index: 6; top: 0; right: -5px; bottom: 0; display: block; width: 10px; cursor: col-resize; touch-action: none; }
 .workspace-active .sidebar-resize-handle::after { position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; content: ""; transition: background .15s; }
 .workspace-active .sidebar-resize-handle:hover::after, .workspace-active .sidebar-resize-handle:focus-visible::after { background: #b7aff4; }
@@ -557,11 +563,13 @@ body.sidebar-resizing * { cursor: col-resize !important; user-select: none !impo
 .git-diff-code .removed { background: #fff0ef; color: #b56a65; }
 .git-diff-code .hunk { background: #f2f0fc; color: #8271b9; }
 @media (max-width: 1100px) and (min-width: 801px) {
- .workspace-active .sidebar { width: var(--workspace-sidebar-width, 250px); }
- .workspace-active .main { margin-left: var(--workspace-sidebar-width, 250px); }
+
+ .main { margin-left: var(--workspace-sidebar-width, 280px); }
 }
 @media (max-width: 800px) {
+ .sidebar { width: 62px; }
  .workspace-active .sidebar { width: 62px; }
+ .main { margin-left: 62px; }
  .workspace-active .main { margin-left: 62px; }
  .workspace-active .sidebar-resize-handle { display: none; }
  .git-mobile-toggle { display: grid; place-items: center; width: 38px; height: 34px; margin-top: 12px; border: 1px solid #e5e1f5; border-radius: 8px; background: #f3f0ff; color: #7662ca; font-size: 21px; cursor: pointer; }
@@ -569,7 +577,9 @@ body.sidebar-resizing * { cursor: col-resize !important; user-select: none !impo
  .git-drawer-open .git-explorer { display: block; }
 }
 @media (max-width: 600px) {
+ .sidebar { width: 52px; }
  .workspace-active .sidebar { width: 52px; }
+ .main { margin-left: 52px; }
  .workspace-active .main { margin-left: 52px; }
  .git-explorer { left: 52px; width: min(280px, calc(100vw - 68px)); }
 }
@@ -602,7 +612,8 @@ body.sidebar-resizing * { cursor: col-resize !important; user-select: none !impo
 .sidebar-usage-status { margin-top: 4px; color: var(--muted); font-size: 10px; }
 
 @media (max-width: 800px) {
-  .sidebar-usage { margin-bottom: 0; padding: 4px 2px; text-align: center; }
+  .sidebar-resize-handle { display: none; }
+ .sidebar-usage { margin-bottom: 0; padding: 4px 2px; text-align: center; }
   .sidebar-usage-actions, .sidebar-usage-row { justify-content: center; column-gap: 0; }
   .sidebar-usage-label { display: none; }
   .sidebar-usage-icon { display: inline; font-size: 13px; }
