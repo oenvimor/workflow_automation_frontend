@@ -143,7 +143,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .user-input-card { max-width: min(760px, 100%); border: 1px solid #d9d4ff; border-radius: 10px; padding: 14px; background: #faf9ff; }
 .user-input-title { margin-bottom: 11px; color: #4f46a5; font-size: 12px; font-weight: 700; }
 .user-input-question { min-width: 0; margin: 0 0 12px; border: 0; border-top: 1px solid #ebe9f7; padding: 10px 0 0; }
-.user-input-question legend { width: 100%; padding: 0 0 7px; color: #343a48; font-size: 11px; font-weight: 650; }
+.user-input-question legend { white-space: pre-wrap; overflow-wrap: anywhere; width: 100%; padding: 0 0 7px; color: #343a48; font-size: 11px; font-weight: 650; }
 .user-input-header { display: block; margin-bottom: 3px; color: #8479bd; font-size: 9px; font-weight: 650; text-transform: uppercase; }
 .user-input-option { display: flex; align-items: flex-start; gap: 8px; margin: 0; border-radius: 7px; padding: 7px 8px; color: #535c6b; font-size: 11px; font-weight: 400; cursor: pointer; }
 .user-input-option:hover { background: #f1efff; }

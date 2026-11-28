@@ -222,10 +222,11 @@ function userInputHTML() {
   const request = state.pendingUserInput;
   if (!request) return "";
   const questions = request.questions || [];
-  return `<form id="userInputForm" class="user-input-card"><div class="user-input-title">Codex 需要你补充信息</div>
+  const approval = request.kind === "approval";
+  return `<form id="userInputForm" class="user-input-card"><div class="user-input-title">${approval ? "Codex 请求确认" : "Codex 需要你补充信息"}</div>
     ${questions.map((question, index) => `<fieldset class="user-input-question"><legend>${question.header ? `<span class="user-input-header">${escapeHTML(question.header)}</span>` : ""}${escapeHTML(question.question)}</legend>
       ${(question.options || []).map((option) => `<label class="user-input-option"><input type="radio" name="answer-${index}" value="${escapeHTML(option.label)}" ${state.answeringUserInput ? "disabled" : ""}><span><strong>${escapeHTML(option.label)}</strong>${option.description ? `<small>${escapeHTML(option.description)}</small>` : ""}</span></label>`).join("")}
-      ${question.isOther ? `<label class="user-input-option"><input type="radio" name="answer-${index}" value="__other__" ${state.answeringUserInput ? "disabled" : ""}><span><strong>其他</strong><small>填写自己的答案</small></span></label><textarea data-other-answer="${index}" rows="2" placeholder="输入其他答案" hidden ${state.answeringUserInput ? "disabled" : ""}></textarea>` : ""}
+      ${question.isOther ? `<label class="user-input-option"><input type="radio" name="answer-${index}" value="__other__" ${state.answeringUserInput ? "disabled" : ""}><span><strong>${approval ? "提交表单" : "其他"}</strong><small>${approval ? "填写 JSON 对象" : "填写自己的答案"}</small></span></label><textarea data-other-answer="${index}" rows="2" placeholder="${approval ? "输入 JSON 对象" : "输入其他答案"}" hidden ${state.answeringUserInput ? "disabled" : ""}></textarea>` : ""}
       ${(question.options || []).length === 0 && !question.isOther ? `<textarea data-free-answer="${index}" rows="2" placeholder="填写答案" ${state.answeringUserInput ? "disabled" : ""}></textarea>` : ""}
     </fieldset>`).join("")}
     <div class="user-input-actions"><span class="user-input-error" role="alert"></span><button type="submit" class="button primary" ${state.answeringUserInput ? "disabled" : ""}>${state.answeringUserInput ? "正在提交…" : "提交选择"}</button></div></form>`;
