@@ -497,7 +497,9 @@ body.workspace-active { height: 100dvh; overflow: hidden; }
 
 .execution-command { flex: 1; min-width: 0; white-space: normal; }
 .execution-command > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: #736a92; }
-.execution-command > pre { margin: 7px 0 2px; padding: 9px; max-height: 240px; overflow: auto; border: 1px solid #e8e6f2; border-radius: 6px; background: #fff; white-space: pre; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.execution-field { margin-top: 7px; }
+.execution-field > span { font-weight: 600; }
+.execution-field > pre { margin: 3px 0 2px; padding: 9px; max-height: 240px; overflow: auto; border: 1px solid #e8e6f2; border-radius: 6px; background: #fff; white-space: pre; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 
 /* Source control lives in the navigation column, independent of task cards. */

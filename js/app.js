@@ -128,32 +128,37 @@ function visibleStreamText(text) {
   }).join("\n").trimEnd();
 }
 
-const expandedCommands = new Set();
+const executionDetailsState = new Map();
 document.addEventListener("toggle", (event) => {
   const element = event.target;
-  if (!(element instanceof HTMLElement) || !element.matches(".execution-command") || !element.isConnected) return;
-  if (element.open) expandedCommands.add(element.dataset.commandKey);
-  else expandedCommands.delete(element.dataset.commandKey);
+  if (!(element instanceof HTMLDetailsElement) || !element.dataset.executionKey || !element.isConnected) return;
+  executionDetailsState.set(element.dataset.executionKey, element.open);
 }, true);
 
 function executionStepLabelHTML(step) {
-  const command = step.command || (step.label?.startsWith("执行命令：") ? step.label.slice(5) : "");
-  if (!command) {
+  const fields = [
+    ["原始命令", step.command],
+    ["调用参数", step.arguments],
+    ["输出", step.output],
+    ["错误", step.error],
+  ].filter(([, value]) => value);
+  if (step.exitCode != null) fields.push(["退出码", String(step.exitCode)]);
+  if (!fields.length) {
     const fileChange = step.label?.startsWith("修改文件：");
     const label = fileChange ? step.label.slice("修改文件：".length) : step.label;
     return `<span class="${fileChange ? "execution-file-change" : ""}">${fileChange ? `<span class="execution-action-label">修改文件</span><span class="execution-file-paths">${escapeHTML(label).replace(/、/g, ", ")}</span>` : escapeHTML(label)}</span>`;
   }
-  const key = `${state.selected?.id}:${step.id}`;
-  const preview = command.replace(/\s+/g, " ").trim();
-  const shortPreview = Array.from(preview).slice(0, 80).join("") + (Array.from(preview).length > 80 ? "…" : "");
-  return `<details class="execution-command" data-command-key="${escapeHTML(key)}" ${expandedCommands.has(key) ? "open" : ""}><summary>执行命令：${escapeHTML(shortPreview)}</summary><pre>${escapeHTML(command)}</pre></details>`;
+
+  const key = `step:${state.selected?.id}:${step.id}`;
+  return `<details class="execution-command" data-execution-key="${escapeHTML(key)}" ${executionDetailsState.get(key) ? "open" : ""}><summary>${escapeHTML(step.label)}</summary>${fields.map(([label, value]) => `<div class="execution-field"><span>${label}</span><pre>${escapeHTML(value)}</pre></div>`).join("")}</details>`;
 }
 
 function executionStepsHTML(message) {
   if (!message.steps?.length) return "";
-  const latestStep = message.steps.at(-1);
-  const renderStep = (step) => `<div class="execution-step"><span class="execution-step-state ${escapeHTML(step.status)}">${step.status === "running" && message.streaming ? "◌" : step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span>${executionStepLabelHTML(step)}</div>`;
-  return `<details class="execution-steps" ${message.streaming ? "open" : ""}><summary>${message.streaming ? "正在执行" : "执行步骤"} · ${message.steps.length} 项</summary><div class="execution-step-preview">${renderStep(latestStep)}</div><div class="execution-step-list">${message.steps.map(renderStep).join("")}</div></details>`;
+  const renderStep = (step, showDetails) => `<div class="execution-step"><span class="execution-step-state ${escapeHTML(step.status)}">${step.status === "running" && message.streaming ? "◌" : step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span>${showDetails ? executionStepLabelHTML(step) : escapeHTML(step.label)}</div>`;
+  const key = `group:${state.selected?.id}:${message.steps[0].id}`;
+  const expanded = executionDetailsState.get(key) ?? message.streaming;
+  return `<details class="execution-steps" data-execution-key="${escapeHTML(key)}" ${expanded ? "open" : ""}><summary>${message.streaming ? "正在执行" : "执行步骤"} · ${message.steps.length} 项</summary><div class="execution-step-preview">${renderStep(message.steps.at(-1), false)}</div><div class="execution-step-list">${message.steps.map((step) => renderStep(step, true)).join("")}</div></details>`;
 }
 
 function conversationHTML() {
@@ -1379,7 +1384,7 @@ function renderWorkspace() {
         ${state.conversationError ? `<div class="form-error">无法从 Codex 读取会话：${escapeHTML(state.conversationError)}</div>` : '<div class="task-sub">会话中暂无消息</div>'}
       </div></section>
       <div class="composer"><div class="attachment-list">${state.attachments.map((image, index) => `<span class="attachment-chip"><img src="${image.dataURL}" alt="${escapeHTML(image.name)}"><button type="button" data-remove-attachment="${index}" aria-label="移除图片">×</button></span>`).join("")}</div><textarea id="messageInput" required placeholder="${isArchived(task) ? "请先恢复任务再继续会话" : task.phase === "development" ? "Codex 执行中，可发送补充要求或引导…" : "继续向 Codex 提交任务指令…"}" ${gated ? "disabled" : ""}>${escapeHTML(state.draft)}</textarea>
-      <div class="composer-settings"><div class="composer-add-wrap"><button type="button" class="composer-plus" id="toggleAttachmentMenu" aria-label="更多选项" ${gated ? "disabled" : ""}>＋</button>${state.attachmentMenuOpen ? '<div class="attachment-menu"><button type="button" id="chooseImage">选择图片</button></div>' : ""}</div><input id="fileInput" type="file" accept="image/*" multiple hidden><span class="composer-option" title="文件访问由任务阶段决定，工具可能需要单独审批">按阶段授权</span>${modeControl}<span class="composer-separator"></span>${modelPicker}<button type="button" id="toggleSpeed" class="speed-button ${fastActive ? "active" : ""}" aria-pressed="${fastActive}" title="${fastTier ? `${fastModeDescription(fastTier)}下一轮生效。` : "当前模型不支持快速模式"}" ${!canConfigureCodex || state.codexModelsLoading || !fastTier ? "disabled" : ""}><span aria-hidden="true">${fastActive ? "⚡" : "◷"}</span><span>${fastActive ? "快速" : "普通"}</span></button><button class="button primary" id="sendMessage" aria-label="发送消息" ${gated ? "disabled" : ""}>↑</button></div></div>
+      <div class="composer-settings"><div class="composer-add-wrap"><button type="button" class="composer-plus" id="toggleAttachmentMenu" aria-label="更多选项" ${gated ? "disabled" : ""}>＋</button>${state.attachmentMenuOpen ? '<div class="attachment-menu"><button type="button" id="chooseImage">选择图片</button></div>' : ""}</div><input id="fileInput" type="file" accept="image/*" multiple hidden><span class="composer-option" title="Codex 拥有本机进程权限，工具执行无需审批">完全访问</span>${modeControl}<span class="composer-separator"></span>${modelPicker}<button type="button" id="toggleSpeed" class="speed-button ${fastActive ? "active" : ""}" aria-pressed="${fastActive}" title="${fastTier ? `${fastModeDescription(fastTier)}下一轮生效。` : "当前模型不支持快速模式"}" ${!canConfigureCodex || state.codexModelsLoading || !fastTier ? "disabled" : ""}><span aria-hidden="true">${fastActive ? "⚡" : "◷"}</span><span>${fastActive ? "快速" : "普通"}</span></button><button class="button primary" id="sendMessage" aria-label="发送消息" ${gated ? "disabled" : ""}>↑</button></div></div>
     </div><aside class="workspace-details" id="workspaceDetails"><section class="workspace-panel event-side-card"><div class="panel-title event-panel-title"><span>运行事件</span><time>${escapeHTML(latestEventTime)}</time></div><div class="panel-body timeline event-scrollbox">${events || '<div class="task-sub">暂无运行事件</div>'}</div></section></aside></div>`;
 
   renderConversationUsageNotice();
