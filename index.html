@@ -1,7 +1,19 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f6f8"><meta name="description" content="Codex 本机研发工作流工作台"><title>开发工作流 · Codex</title><link rel="stylesheet" href="/css/style.css"></head>
 <body><div class="app-shell">
-  <aside class="sidebar"><div class="brand"><div class="brand-mark">W</div><div><strong>Workflow</strong><span>本机开发工作台</span></div></div><button class="nav-item active" id="navTasks"><span class="nav-icon">▦</span><span class="nav-label">任务</span></button><button type="button" class="git-mobile-toggle hidden" id="toggleGitExplorer" aria-label="源代码管理" aria-expanded="false">⑂</button><section id="gitExplorer" class="git-explorer hidden" aria-label="源代码管理"></section><div class="side-bottom"><div class="side-label">连接状态</div><div class="connection"><i id="codexDot"></i><span>Codex</span><b id="codexState">检测中</b></div><div class="connection"><i id="mysqlDot"></i><span>MySQL</span><b id="mysqlState">检测中</b></div><div class="connection"><i class="dot muted"></i><span>Apifox</span><b>由 Codex MCP 提供</b></div><div class="user-chip"><div class="avatar">本</div><span>本机工作区</span><span class="more">···</span></div></div><div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="460" aria-label="拖动调整左侧栏宽度" title="拖动调整左侧栏宽度"></div></aside>
+  <aside class="sidebar"><div class="brand"><div class="brand-mark">W</div><div><strong>Workflow</strong><span>本机开发工作台</span></div></div><button type="button" class="git-mobile-toggle hidden" id="toggleGitExplorer" aria-label="源代码管理" aria-expanded="false">⑂</button><section id="gitExplorer" class="git-explorer hidden" aria-label="源代码管理"></section>
+    <div class="sidebar-footer">
+    <section class="sidebar-usage" aria-label="模型用量">
+      <div class="sidebar-usage-actions">
+        <button type="button" class="usage-button" id="openUsage" aria-label="模型用量查询" title="模型用量查询"><span class="sidebar-usage-icon" aria-hidden="true">▥</span><span class="sidebar-usage-label">模型用量查询</span></button>
+        <button type="button" class="usage-button sidebar-usage-refresh" id="refreshUsage" aria-label="刷新模型用量" title="刷新模型用量"><span aria-hidden="true">↻</span></button>
+      </div>
+      <div id="sidebarUsageData" class="sidebar-usage-data"></div>
+      <div id="sidebarUsageStatus" class="sidebar-usage-status" role="status"></div>
+    </section>
+    <div class="side-bottom"><div class="side-label">连接状态</div><div class="connection"><i id="codexDot"></i><span>Codex</span><b id="codexState">检测中</b></div><div class="connection"><i id="mysqlDot"></i><span>MySQL</span><b id="mysqlState">检测中</b></div><div class="connection"><i class="dot muted"></i><span>Apifox</span><b>由 Codex MCP 提供</b></div><div class="user-chip"><div class="avatar">本</div><span>本机工作区</span><span class="more">···</span></div></div>
+    </div>
+    <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="460" aria-label="拖动调整左侧栏宽度" title="拖动调整左侧栏宽度"></div></aside>
   <main class="main"><header class="topbar"><div><div class="eyebrow">LOCAL WORKFLOW</div><h1 id="pageTitle">开发工作流</h1></div><div class="top-actions"><span class="local-badge"><i></i>仅本机访问</span><button class="button primary" id="newTask">＋ 新建任务</button></div></header>
     <div class="error-banner hidden" id="globalError"></div>
     <section id="listPage"><div class="intro-row"><div><h2>任务</h2><p>在一个地方跟进 Codex 开发任务、阶段和需要你处理的事项。</p></div><div class="updated" id="taskCount">0 个任务</div></div><div class="filters" id="filters" role="tablist" aria-label="筛选任务"><button class="filter active" data-filter="all" role="tab" aria-selected="true">已创建</button><button class="filter" data-filter="running" role="tab" aria-selected="false">进行中 <span id="runningCount" class="filter-count hidden"></span></button><button class="filter" data-filter="waiting" role="tab" aria-selected="false">待处理 <span id="waitingCount" class="filter-count hidden"></span></button><button class="filter" data-filter="done" role="tab" aria-selected="false">已完成</button><button class="filter" data-filter="archived" role="tab" aria-selected="false">已归档</button></div><div class="task-table card"><div class="table-head" aria-hidden="true"><span>任务名称</span><span>仓库</span><span>当前阶段</span><span>状态</span><span>更新时间</span><span></span></div><div id="taskRows"></div><div class="empty hidden" id="empty"><div class="empty-icon">⌘</div><h3>从一个开发任务开始</h3><p>选择本地仓库并描述需求，工作台会把任务交给 Codex。</p><button class="button primary" id="emptyNew">创建第一个任务</button></div></div></section>
@@ -19,5 +31,14 @@
       <button type="submit" class="button primary" value="enable">启用 Ultra</button>
     </div>
   </form>
+</dialog>
+<dialog id="usageDialog" class="usage-dialog" aria-labelledby="usageDialogTitle">
+  <div class="usage-panel">
+    <header class="usage-head">
+      <div><h2 id="usageDialogTitle">模型用量查询</h2><p>账户级 Token 用量与限流配额，数据来自本机 Codex。</p></div>
+      <button type="button" class="icon-button" id="closeUsageDialog" aria-label="关闭用量查询">×</button>
+    </header>
+    <div id="usageBody" class="usage-body"></div>
+  </div>
 </dialog>
 <script type="module" src="/js/app.js"></script></body></html>

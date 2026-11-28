@@ -165,9 +165,17 @@ function isQuestionAnswerPrompt(text = "") {
   return text.split("\nUser request or context:\n", 1)[0].split("\n").some((line) => line.startsWith("Phase: plan_qa."));
 }
 
+function workModeKey(task) {
+  return task.phase === "development"
+    ? `workflow.workMode.${task.id}.development`
+    : `workflow.workMode.${task.id}`;
+}
+
 function selectedWorkMode(task) {
-  if (displayPhase(task.phase) !== "plan") return "default";
-  return localStorage.getItem(`workflow.workMode.${task.id}`) === "default" ? "default" : "plan";
+  const phase = displayPhase(task.phase);
+  if (phase === "development") return localStorage.getItem(workModeKey(task)) === "plan" ? "plan" : "default";
+  if (phase === "plan") return localStorage.getItem(workModeKey(task)) === "default" ? "default" : "plan";
+  return "default";
 }
 
 function deferredPlanApproval(task) {
@@ -196,7 +204,7 @@ function recoverablePlanReply(task) {
 
 function planReviewHTML() {
   const task = state.selected;
-  if (!task || isArchived(task) || selectedWorkMode(task) !== "plan") return "";
+  if (!task || displayPhase(task.phase) !== "plan" || isArchived(task) || selectedWorkMode(task) !== "plan") return "";
   if (state.sendingMessage || isCodexActive()) return "";
   if (deferredPlanApproval(task)) return "";
   if (!task.approval && !recoverablePlanReply(task)) return "";
@@ -1100,14 +1108,213 @@ function confirmNearButton(selector, title, description, confirmLabel) {
   });
 }
 
+function formatTokens(value) {
+  if (value == null) return "—";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  if (number >= 1e9) return `${(number / 1e9).toFixed(2)}B`;
+  if (number >= 1e6) return `${(number / 1e6).toFixed(2)}M`;
+  if (number >= 1e3) return `${(number / 1e3).toFixed(1)}K`;
+  return String(number);
+}
+
+function usageStat(label, value) {
+  return `<div class="usage-stat"><b>${value}</b><span>${escapeHTML(label)}</span></div>`;
+}
+
+function formatResetTime(resetsAt) {
+  if (resetsAt == null) return "—";
+  const timestamp = Number(resetsAt) * 1000;
+  if (!Number.isFinite(timestamp)) return "—";
+  const date = new Date(timestamp);
+  const hhmm = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const monthDay = `${date.getMonth() + 1}月${date.getDate()}日`;
+  const diff = timestamp - Date.now();
+  if (diff <= 0) return `${monthDay} ${hhmm}`;
+  const totalMinutes = Math.ceil(diff / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  const countdown = [days ? `${days} 天` : "", hours ? `${hours} 小时` : "", `${minutes} 分钟`].filter(Boolean).join(" ");
+  return `${countdown}后（${monthDay} ${hhmm}）`;
+}
+
+function windowDurationLabel(minutes) {
+  if (minutes == null) return "";
+  if (minutes < 60) return `${minutes} 分钟`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)} 小时`;
+  return `${Math.round(minutes / 1440)} 天`;
+}
+
+function quotaBarClass(usedPercent) {
+  if (usedPercent >= 100) return "is-full";
+  if (usedPercent >= 80) return "is-high";
+  return "";
+}
+
+function rateWindowHTML(title, fallbackLabel, window) {
+  if (!window) return "";
+  const used = Math.max(0, Math.min(100, Number(window.usedPercent) || 0));
+  const duration = windowDurationLabel(window.windowDurationMins) || fallbackLabel;
+  const reset = formatResetTime(window.resetsAt);
+  return `<div class="quota-window"><div class="quota-window-head"><strong>${escapeHTML(title)}</strong><span class="quota-meta">${escapeHTML(duration)}${reset !== "—" ? ` · 重置 ${escapeHTML(reset)}` : ""}</span></div><div class="quota-bar"><span class="quota-bar-fill ${quotaBarClass(used)}" style="width:${used}%"></span></div><div class="quota-used">已用 ${used}%</div></div>`;
+}
+
+function rateLimitsHTML(limits) {
+  const snapshot = limits?.rateLimits;
+  if (!snapshot) return '<div class="usage-empty">暂无配额数据</div>';
+  const allowed = limits.ordinaryUsageAllowed;
+  const reached = allowed === false || snapshot.rateLimitReachedType === "rate_limit_reached";
+  const status = allowed === null
+    ? '<span class="quota-status unknown">额度状态未知</span>'
+    : reached
+      ? '<span class="quota-status blocked">已触达限流</span>'
+      : '<span class="quota-status ok">额度正常</span>';
+  const resets = limits.rateLimitResetCredits?.availableCount
+    ? `<span class="quota-resets">剩余重置 ${limits.rateLimitResetCredits.availableCount} 次</span>`
+    : "";
+  const windows = [
+    rateWindowHTML("本次额度", "短周期", snapshot.primary),
+    rateWindowHTML("周期额度", "长周期", snapshot.secondary),
+  ].filter(Boolean).join("");
+
+  return `<div class="usage-section"><h3>配额状态</h3><div class="quota-status-row">${status}${resets}</div></div>${windows ? `<div class="usage-section"><h3>限流额度</h3><div class="quota-windows">${windows}</div></div>` : ""}`;
+}
+
+function usageHTML(usage) {
+  const summary = usage.summary || {};
+  const buckets = usage.dailyUsageBuckets || [];
+  const recent = [...buckets].reverse().slice(0, 14);
+  const maxDaily = recent.reduce((max, bucket) => Math.max(max, Number(bucket.tokens) || 0), 0);
+
+  const stats = [
+    usageStat("生命周期 tokens", formatTokens(summary.lifetimeTokens)),
+    usageStat("单日峰值", formatTokens(summary.peakDailyTokens)),
+    usageStat("连续使用天数", formatTokens(summary.currentStreakDays)),
+    usageStat("最长连续天数", formatTokens(summary.longestStreakDays)),
+  ].join("");
+
+  const daily = recent.length
+    ? `<div class="usage-daily">${recent.map((bucket) => {
+      const tokens = Number(bucket.tokens) || 0;
+      const width = maxDaily > 0 ? Math.max(2, Math.round((tokens / maxDaily) * 100)) : 0;
+      return `<div class="usage-row"><span class="usage-date">${escapeHTML(bucket.startDate)}</span><span class="usage-bar-wrap"><span class="usage-bar" style="width:${width}%"></span></span><span class="usage-tokens">${formatTokens(tokens)}</span></div>`;
+    }).join("")}</div>`
+    : '<div class="usage-empty">暂无每日用量数据</div>';
+
+  return `<div class="usage-section"><h3>账户概览</h3><div class="usage-stats">${stats}</div></div>
+    <div class="usage-section"><h3>近 ${recent.length} 天用量</h3>${daily}</div>`;
+}
+
+const usageRefreshIntervalMs = 5 * 60 * 1000;
+let accountLimits = null;
+let accountUsage = null;
+let usageRequestFailures = [];
+let usageRefreshPending = false;
+
+function quotaResetCountdown(resetsAt) {
+  if (!Number.isFinite(resetsAt)) return "";
+  const reset = new Date(resetsAt * 1000);
+  const minutesLeft = Math.max(0, Math.ceil((reset.getTime() - Date.now()) / 60000));
+  const days = Math.floor(minutesLeft / 1440);
+  const hours = Math.floor(minutesLeft / 60) % 24;
+  const minutes = minutesLeft % 60;
+  const countdown = [days && `${days}d`, hours && `${hours}h`, `${minutes}m`].filter(Boolean).join(" ");
+  const resetTime = reset.toLocaleString([], {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+  return `<time class="sidebar-usage-reset" datetime="${reset.toISOString()}" title="重置时间 ${escapeHTML(resetTime)}"><span aria-hidden="true">◷</span> ${countdown}</time>`;
+}
+
+function quotaHighlight(window, exhaustedLabel = "0%") {
+  const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
+  const level = remaining <= 10 ? "low" : remaining <= 30 ? "warning" : "healthy";
+  return `<b class="quota-highlight ${level}">${remaining === 0 ? exhaustedLabel : `${remaining}%`}</b>`;
+}
+
+function renderSidebarQuota() {
+  const snapshot = accountLimits?.rateLimits;
+  const primary = snapshot?.primary;
+  const secondary = snapshot?.secondary;
+  const shortLabel = windowDurationLabel(primary?.windowDurationMins) || "短周期";
+  const resets = accountLimits?.rateLimitResetCredits?.availableCount;
+  $("#sidebarUsageData").innerHTML = [
+    primary ? `<div class="sidebar-usage-row"><span class="sidebar-usage-value">${escapeHTML(shortLabel)}${primary.usedPercent < 100 ? "剩 " : " "}${quotaHighlight(primary, "用完")}</span>${quotaResetCountdown(primary.resetsAt)}</div>` : "",
+    secondary || resets != null ? `<div class="sidebar-usage-row"><span class="sidebar-usage-value">${secondary ? `额度 ${quotaHighlight(secondary)}` : ""}${resets != null ? `${secondary ? " · " : ""}重置 <b>${resets}</b> 次` : ""}</span>${quotaResetCountdown(secondary?.resetsAt)}</div>` : "",
+  ].join("");
+}
+
+const usageLimitMessage = "已达到用量上限";
+const sendUsageLimits = new Set();
+
+function renderConversationUsageNotice() {
+  const notice = $("#conversationUsageNotice");
+  if (!notice) return;
+  const task = state.selected;
+  const snapshot = accountLimits?.rateLimits;
+  const accountBlocked = accountLimits?.ordinaryUsageAllowed === false ||
+    snapshot?.rateLimitReachedType === "rate_limit_reached" ||
+    [snapshot?.primary, snapshot?.secondary].some(window => window?.usedPercent >= 100);
+  const lastError = task?.events?.findLast(event => event.kind === "error");
+  const turnBlocked = task?.status === "codex_error" && lastError?.message === usageLimitMessage;
+  notice.hidden = !(accountBlocked || turnBlocked || sendUsageLimits.has(task?.id));
+}
+
+function renderAccountUsage() {
+  renderSidebarQuota();
+  renderConversationUsageNotice();
+  $("#sidebarUsageStatus").textContent = usageRefreshPending
+    ? ""
+    : usageRequestFailures.includes("配额")
+      ? "配额刷新失败"
+      : $("#sidebarUsageData").children.length ? "" : "暂无用量数据";
+
+  if (!$("#usageDialog").open) return;
+  $("#usageBody").innerHTML = `${usageRequestFailures.length ? `<div class="usage-error">${escapeHTML(usageRequestFailures.join("和"))}刷新失败</div>` : ""}${accountLimits ? rateLimitsHTML(accountLimits) : ""}${accountUsage ? usageHTML(accountUsage) : ""}`;
+}
+
+async function refreshAccountUsage() {
+  if (usageRefreshPending) return;
+  usageRefreshPending = true;
+  usageRequestFailures = [];
+  $("#refreshUsage").disabled = true;
+  renderAccountUsage();
+
+  try {
+    const [limits, usage] = await Promise.allSettled([
+      api("/api/codex/rate-limits"),
+      api("/api/codex/usage"),
+    ]);
+    if (limits.status === "fulfilled") {
+      accountLimits = limits.value;
+      if (accountLimits?.ordinaryUsageAllowed === true) sendUsageLimits.clear();
+    } else usageRequestFailures.push("配额");
+    if (usage.status === "fulfilled") accountUsage = usage.value;
+    else usageRequestFailures.push("用量");
+  } finally {
+    usageRefreshPending = false;
+    $("#refreshUsage").disabled = false;
+    renderAccountUsage();
+  }
+}
+
+function openUsageDialog() {
+  $("#usageDialog").showModal();
+  renderAccountUsage();
+}
+
 function renderWorkspace() {
   const task = state.selected;
   if (!task) return;
   const selectedCodexMode = selectedWorkMode(task);
-  const canChooseMode = displayPhase(task.phase) === "plan" && !isArchived(task);
+  const inPlan = displayPhase(task.phase) === "plan";
+  const canChooseMode = (inPlan || task.phase === "development") && !isArchived(task);
+  const defaultModeLabel = inPlan ? "默认问答" : "默认";
   const modeControl = canChooseMode
-    ? `<button type="button" id="codexWorkMode" class="codex-mode-badge ${selectedCodexMode}" title="切换至${selectedCodexMode === "plan" ? "默认问答" : " Plan"}"><span class="mode-indicator" aria-hidden="true"></span>Codex · ${selectedCodexMode === "plan" ? "Plan" : "默认问答"}</button>`
+    ? `<button type="button" id="codexWorkMode" class="codex-mode-badge ${selectedCodexMode}" title="切换至${selectedCodexMode === "plan" ? defaultModeLabel : " Plan"}"><span class="mode-indicator" aria-hidden="true"></span>Codex · ${selectedCodexMode === "plan" ? "Plan" : defaultModeLabel}</button>`
     : '<span class="codex-mode-badge default"><span class="mode-indicator"></span>Codex · 默认</span>';
+  const previousResults = $(".task-results");
+  const resultsOpen = previousResults?.dataset.phase === task.phase ? previousResults.open : undefined;
   const detailsOpen = $(".workspace-details")?.classList.contains("is-open");
   const sidebarScrollTop = $(".workspace-details")?.scrollTop || 0;
   const previousList = $(".conversation-list");
@@ -1125,8 +1332,9 @@ function renderWorkspace() {
   const archivedNotice = isArchived(task)
     ? '<div class="archive-notice">任务已归档。Codex 会话没有停止；恢复任务后可以继续操作。</div>' : "";
   const canConfigureCodex = !isArchived(task) && ["plan", "development", "dev_review"].includes(displayPhase(task.phase)) &&
-    !["persistence_error", "release_failed", "needs_review"].includes(task.status);
-  const gated = !canConfigureCodex || (Boolean(task.approval) && selectedCodexMode === "plan" && !deferredPlanApproval(task));
+    !["persistence_error", "release_failed"].includes(task.status) &&
+    (task.status !== "needs_review" || task.phase === "development");
+  const gated = !canConfigureCodex || (inPlan && Boolean(task.approval) && selectedCodexMode === "plan" && !deferredPlanApproval(task));
   const events = (task.events || []).map((event) => `<div class="event"><span class="event-icon">${event.kind === "error" ? "!" : "·"}</span>
     <div><p>${escapeHTML(event.message)}</p><time>${Number.isFinite(new Date(event.createdAt).getTime()) ? new Date(event.createdAt).toLocaleString() : "时间未知"}</time></div></div>`).join("");
   const latestEvent = (task.events || []).reduce((latest, event) => {
@@ -1138,7 +1346,7 @@ function renderWorkspace() {
   const fastTier = fastServiceTier(model);
   const fastActive = Boolean(fastTier) && state.speedMode === "priority";
   const modelPicker = modelPickerHTML(model, !canConfigureCodex || state.codexModelsLoading || !state.codexModels.length);
-  const result = `<section class="workspace-panel"><div class="panel-title">任务结果</div><div class="panel-body result-summary">
+  const result = `<details class="workspace-panel task-results" data-phase="${escapeHTML(task.phase)}"><summary class="panel-title">任务结果与审核</summary><div class="panel-body result-summary">
     ${task.result?.summary ? `<div class="result-plan"><strong>方案</strong><div class="conversation-text">${renderMarkdown(task.result.summary)}</div></div>` : ""}
     ${task.result?.developmentSummary ? `<p><strong>开发总结：</strong>${escapeHTML(task.result.developmentSummary)}</p>` : ""}
     ${task.result?.reviewSummary ? `<p><strong>Review：</strong>${escapeHTML(task.result.reviewSummary)}</p>` : ""}
@@ -1150,18 +1358,19 @@ function renderWorkspace() {
     ${task.phase === "release" && (task.result?.releaseSteps || []).length ? `<div><strong>发布步骤</strong><ul>${task.result.releaseSteps.map((step) => `<li>${escapeHTML(step.name)}：${escapeHTML(step.status)}${step.error ? `（${escapeHTML(step.error)}）` : ""}</li>`).join("")}</ul></div>` : ""}
     ${task.phase === "release" && task.status === "release_failed" && !isArchived(task) ? '<button class="button primary" data-approval="retry">重试失败步骤</button>' : ""}
     ${task.result?.report ? `<details><summary>完整执行报告</summary><pre>${escapeHTML(JSON.stringify(task.result.report, null, 2))}</pre></details>` : ""}
-  </div></section>`;
+  </div></details>`;
   const resultVisible = currentIndex >= phases.indexOf("development");
 
-  $("#workspace").innerHTML = `<div class="workspace-head"><div class="workspace-heading"><h2>${escapeHTML(task.title)}</h2><p>${escapeHTML(task.repositoryPath)}</p></div><div class="workspace-actions"><button type="button" class="button refresh-workspace-button" id="refreshWorkspace" aria-label="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" title="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" ${state.refreshingTaskID === task.id ? "disabled" : ""}><span class="refresh-icon ${state.refreshingTaskID === task.id ? "is-spinning" : ""}" aria-hidden="true">↻</span></button><button type="button" class="button" id="toggleWorkspaceDetails" aria-expanded="false" aria-controls="workspaceDetails">任务详情</button><button class="button ${isArchived(task) ? "" : "archive-button"}" id="toggleArchive">${isArchived(task) ? "恢复任务" : "归档任务"}</button></div></div><div class="phasebar">${phaseSteps}</div>${archivedNotice}
-    <div class="workspace-grid"><div><div id="approvalSlot">${blocker}</div>
-      <section class="workspace-panel conversation-panel"><div class="panel-title">Codex 会话</div><div class="panel-body conversation-list">
+  $("#workspace").innerHTML = `<div class="workspace-head"><div class="workspace-heading"><h2>${escapeHTML(task.title)}</h2><p>${escapeHTML(task.repositoryPath)}</p></div><div class="workspace-actions"><button type="button" class="button refresh-workspace-button" id="refreshWorkspace" aria-label="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" title="${state.refreshingTaskID === task.id ? "刷新中" : "刷新"}" ${state.refreshingTaskID === task.id ? "disabled" : ""}><span class="refresh-icon ${state.refreshingTaskID === task.id ? "is-spinning" : ""}" aria-hidden="true">↻</span></button><button type="button" class="button" id="toggleWorkspaceDetails" aria-expanded="false" aria-controls="workspaceDetails">运行事件</button><button class="button ${isArchived(task) ? "" : "archive-button"}" id="toggleArchive">${isArchived(task) ? "恢复任务" : "归档任务"}</button></div></div><div class="phasebar">${phaseSteps}</div>${archivedNotice}
+    <div class="workspace-grid"><div><div id="approvalSlot">${blocker}</div>${resultVisible ? result : ""}
+      <section class="workspace-panel conversation-panel"><div class="panel-title">Codex 会话</div><div id="conversationUsageNotice" class="conversation-usage-notice" role="status" hidden>${usageLimitMessage}</div><div class="panel-body conversation-list">
         ${state.conversationError ? `<div class="form-error">无法从 Codex 读取会话：${escapeHTML(state.conversationError)}</div>` : '<div class="task-sub">会话中暂无消息</div>'}
       </div></section>
       <div class="composer"><div class="attachment-list">${state.attachments.map((image, index) => `<span class="attachment-chip"><img src="${image.dataURL}" alt="${escapeHTML(image.name)}"><button type="button" data-remove-attachment="${index}" aria-label="移除图片">×</button></span>`).join("")}</div><textarea id="messageInput" required placeholder="${isArchived(task) ? "请先恢复任务再继续会话" : task.phase === "development" ? "Codex 执行中，可发送补充要求或引导…" : "继续向 Codex 提交任务指令…"}" ${gated ? "disabled" : ""}>${escapeHTML(state.draft)}</textarea>
       <div class="composer-settings"><div class="composer-add-wrap"><button type="button" class="composer-plus" id="toggleAttachmentMenu" aria-label="更多选项" ${gated ? "disabled" : ""}>＋</button>${state.attachmentMenuOpen ? '<div class="attachment-menu"><button type="button" id="chooseImage">选择图片</button></div>' : ""}</div><input id="fileInput" type="file" accept="image/*" multiple hidden><button type="button" class="composer-option">完全访问</button>${modeControl}<span class="composer-separator"></span>${modelPicker}<button type="button" id="toggleSpeed" class="speed-button ${fastActive ? "active" : ""}" aria-pressed="${fastActive}" title="${fastTier ? `${fastModeDescription(fastTier)}下一轮生效。` : "当前模型不支持快速模式"}" ${!canConfigureCodex || state.codexModelsLoading || !fastTier ? "disabled" : ""}><span aria-hidden="true">${fastActive ? "⚡" : "◷"}</span><span>${fastActive ? "快速" : "普通"}</span></button><button class="button primary" id="sendMessage" aria-label="发送消息" ${gated ? "disabled" : ""}>↑</button></div></div>
-    </div><aside class="workspace-details" id="workspaceDetails">${resultVisible ? result : ""}<section class="workspace-panel event-side-card"><div class="panel-title event-panel-title"><span>运行事件</span><time>${escapeHTML(latestEventTime)}</time></div><div class="panel-body timeline event-scrollbox">${events || '<div class="task-sub">暂无运行事件</div>'}</div></section></aside></div>`;
+    </div><aside class="workspace-details" id="workspaceDetails"><section class="workspace-panel event-side-card"><div class="panel-title event-panel-title"><span>运行事件</span><time>${escapeHTML(latestEventTime)}</time></div><div class="panel-body timeline event-scrollbox">${events || '<div class="task-sub">暂无运行事件</div>'}</div></section></aside></div>`;
 
+  renderConversationUsageNotice();
   const workspace = $("#workspace");
   const composer = workspace.querySelector(".composer");
   const resizeHandle = document.createElement("div");
@@ -1204,6 +1413,8 @@ function renderWorkspace() {
   const center = document.createElement("div");
   center.className = "workspace-center";
   const grid = workspace.querySelector(".workspace-grid");
+  const taskResults = grid.querySelector(".task-results");
+  if (taskResults) taskResults.open = resultsOpen ?? ["dev_review", "risk_review", "release"].includes(task.phase);
   const details = grid.querySelector(".workspace-details");
   const header = document.createElement("div");
   header.className = "workspace-header";
@@ -1217,7 +1428,7 @@ function renderWorkspace() {
   const setDetailsOpen = (open) => {
     details.classList.toggle("is-open", open);
     detailsButton.setAttribute("aria-expanded", String(open));
-    detailsButton.textContent = open ? "关闭详情" : "任务详情";
+    detailsButton.textContent = open ? "关闭运行事件" : "运行事件";
   };
   setDetailsOpen(Boolean(detailsOpen));
   details.scrollTop = sidebarScrollTop;
@@ -1227,7 +1438,7 @@ function renderWorkspace() {
     if (selectedCodexMode === "plan" && task.approval?.id) {
       localStorage.setItem(`workflow.deferredPlanApproval.${task.id}`, task.approval.id);
     }
-    localStorage.setItem(`workflow.workMode.${task.id}`, selectedCodexMode === "plan" ? "default" : "plan");
+    localStorage.setItem(workModeKey(task), selectedCodexMode === "plan" ? "default" : "plan");
     renderWorkspace();
     $("#codexWorkMode")?.focus();
   });
@@ -1302,8 +1513,10 @@ async function sendMessage() {
   const task = state.selected;
   const taskID = task.id;
   const mode = selectedWorkMode(task);
-  const approvalID = mode === "plan" ? deferredPlanApproval(task) : "";
+  const approvalID = mode === "plan" && displayPhase(task.phase) === "plan" ? deferredPlanApproval(task) : "";
   const wasActive = isCodexActive();
+  sendUsageLimits.delete(taskID);
+  renderConversationUsageNotice();
   state.sendingMessage = true;
   const optimisticMessage = appendUserMessage(message);
   updateSendButton();
@@ -1338,7 +1551,12 @@ async function sendMessage() {
     state.draft = message;
     const input = $("#messageInput");
     if (input) input.value = message;
-    alert(error.message);
+    if (/usage limit|usage_limit_reached/i.test(error.message)) {
+      sendUsageLimits.add(taskID);
+      renderConversationUsageNotice();
+    } else {
+      alert(error.message);
+    }
   }
 }
 
@@ -1429,7 +1647,10 @@ async function sendApproval(action) {
     if (state.selected?.id === taskID) state.approvalDraft = "";
     await refreshSelectedTask(taskID);
   } catch (error) {
-    if (state.selected?.id === taskID) removeConversationMessage(optimisticMessage);
+    if (state.selected?.id === taskID) {
+      removeConversationMessage(optimisticMessage);
+      if (action === "approve") await refreshSelectedTask(taskID);
+    }
     alert(error.message);
   } finally {
     if (state.submittingApproval === taskID) state.submittingApproval = null;
@@ -1554,7 +1775,6 @@ $("#backToTasks").addEventListener("click", () => {
   $("#workspacePage").classList.add("hidden"); $("#listPage").classList.remove("hidden");
   $("#pageTitle").textContent = "开发工作流"; state.selected = null; state.draft = ""; state.approvalDraft = ""; refreshTasks();
 });
-$("#navTasks").addEventListener("click", () => $("#backToTasks").click());
 $("#filters").addEventListener("click", (event) => {
   const button = event.target.closest("[data-filter]"); if (!button) return;
   state.filter = button.dataset.filter;
@@ -1586,6 +1806,16 @@ $("#createForm").addEventListener("submit", async (event) => {
 });
 
 $("#createDialog").addEventListener("click", (event) => { if (event.target === $("#createDialog")) $("#createDialog").close(); });
+$("#openUsage").addEventListener("click", openUsageDialog);
+$("#refreshUsage").addEventListener("click", refreshAccountUsage);
+refreshAccountUsage();
+window.setInterval(refreshAccountUsage, usageRefreshIntervalMs);
+window.setInterval(() => {
+  if ($("#usageDialog").open) renderAccountUsage();
+  else renderSidebarQuota();
+}, 60 * 1000);
+$("#closeUsageDialog").addEventListener("click", () => $("#usageDialog").close());
+$("#usageDialog").addEventListener("click", (event) => { if (event.target === $("#usageDialog")) $("#usageDialog").close(); });
 refreshTasks();
 refreshStatus();
 
